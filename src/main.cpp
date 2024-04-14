@@ -10,7 +10,6 @@
 const char *APPLICATION_NAME = "Render Engine 2.0";
 
 void glutDisplayFunc();
-void process_normal_keys(unsigned char key, int x, int y);
 
 int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow){
     int argc;
@@ -39,8 +38,6 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
     ImGui_ImplOpenGL2_Init();
     ImGui_ImplGLUT_InstallFuncs();
 
-    //glutKeyboardFunc(process_normal_keys);
-
     RenderEngine::init();
 
     // Main loop
@@ -53,20 +50,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
 
     return 0;
 }
-void process_normal_keys(unsigned char key, int x, int y){
-    if(!viewport_focused){ return; }
 
-    if(key ==  'w'){ camera = camera + look_dir * 0.5f; }
-    if(key ==  's'){ camera = camera - look_dir * 0.5f; }
-    if(key ==  'a'){ camera = camera + look_dir.cross_product(RenderEngine::vec3(0, 1, 0)) * 0.5f; }
-    if(key ==  'd'){ camera = camera - look_dir.cross_product(RenderEngine::vec3(0, 1, 0)) * 0.5f; }
-    if(key ==  ' '){ camera.y += 0.5f; }
-    if(key ==  'r'){ camera.y -= 0.5f; }
-    if(key ==  'o'){ fyaw += 0.08f; }
-    if(key ==  'p'){ fyaw -= 0.08f; }
-    if(key ==  'k'){ }
-    if(key ==  'l'){ }
-}
 
 void glutDisplayFunc(){
     // Start the Dear ImGui frame
@@ -76,7 +60,7 @@ void glutDisplayFunc(){
     ImGuiIO& io = ImGui::GetIO();
 
 
-    render();
+    Application::render();
 
     // Rendering
     ImGui::Render();

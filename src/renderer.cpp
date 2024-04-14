@@ -14,6 +14,7 @@ int fbo_height = 256;
 int frame_rate = 0;
 int frame_rate_counter = 0;
 int target_fps = 60;
+float mouse_sens = 0.008f;
 
 std::chrono::steady_clock::time_point fps_counter_start; 
 
@@ -23,13 +24,14 @@ using namespace RenderEngine;
 
 vec3 light = { 0.5, 0.5, 0 };
 vec3 camera = {0, 0, 0};
-vec3 look_dir;
-vec3 background_color = { 0.1, 0.1, 0.1 };
+vec3 look_dir = {0, 0, 1};
+vec3 background_color = { 0.1, 0.15, 0.2 };
+vec3 new_look_dir;
 
 mesh default_mesh;
 std::future<void> world;
 
-float fyaw = 0;
+vec3 delta_mouse;
 
 bool draw_wireframe_bool = false;
 bool viewport_focused = false;
@@ -53,7 +55,7 @@ void RenderEngine::init(){
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-	world = std::async(std::launch::async, [](){ default_mesh.load_mesh_from_file("resources\\terrain3.obj"); } );
+	world = std::async(std::launch::async, [](){ default_mesh.load_mesh_from_file("D:\\Projects\\renderEngine2\\resources\\mountains.obj"); } );
 	fps_counter_start = std::chrono::steady_clock::now();
 }
 void RenderEngine::prepare(){
@@ -76,7 +78,7 @@ void RenderEngine::rescale_framebuffer(float width, float height){
 	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
 
 }
-std::mutex mtx;
+
 std::vector<triangle> RenderEngine::thread_lighting(mat4 mat_view, mat4 mat_proj){
 	std::vector<triangle> queue;
 	if(!default_mesh.loaded){ return queue; }
@@ -93,7 +95,7 @@ std::vector<triangle> RenderEngine::thread_lighting(mat4 mat_view, mat4 mat_proj
 		vec3 vCameraRay = tri.point[0] - camera;
 
 		// If ray is aligned with normal, then triangle is visible
-		if(tri.normal.dot_product(vCameraRay) < 0.0f && look_dir.dot_product(vCameraRay) > 0.0f){
+		if(tri.normal.dot_product(vCameraRay) < 0.0f && new_look_dir.dot_product(vCameraRay) > 0.0f){
 
 			tri.colour = vec3(tri.normal.dot_product(light)) * 1.0f;
 
@@ -113,10 +115,6 @@ std::vector<triangle> RenderEngine::thread_lighting(mat4 mat_view, mat4 mat_proj
 					tri.point[1] = mat_proj * clipped[n].point[1];
 					tri.point[2] = mat_proj * clipped[n].point[2];
 				}
-
-				tri.calculate_normal();
-				tri.normal.normalize();
-				tri.colour = clipped[n].colour;
 
 				// Scale into view
 				tri.point[0].x -= 1.0f;
@@ -138,7 +136,6 @@ std::vector<triangle> RenderEngine::thread_lighting(mat4 mat_view, mat4 mat_proj
 	}
 	return queue;
 }
-
 std::vector<triangle> RenderEngine::thread_clip(std::vector<triangle> queue){
 	if(queue.size() == 0){ return queue; }
 	std::vector<triangle> draw_order;
@@ -195,44 +192,49 @@ std::vector<triangle> RenderEngine::thread_sort(std::vector<triangle> queue){
 	return queue;
 }
 CycleContext cc;
-
+vec3 cam_rot_angle;
 GLuint RenderEngine::update(float width, float height){
-	std::chrono::steady_clock::time_point mspf_counter_start = std::chrono::steady_clock::now(); 
-
+	
 	//calculate fps
+	std::chrono::steady_clock::time_point mspf_counter_start = std::chrono::steady_clock::now(); 
 	int duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - fps_counter_start).count();
 	if(duration >= 1000){ 
 		frame_rate = frame_rate_counter; 
 		frame_rate_counter = 0; 
 		fps_counter_start = std::chrono::steady_clock::now();
 	}
+
+	//input handler
 	io();
+	
+	//initializing frame
 	rescale_framebuffer(width, height);
 	prepare();
+
+	//applying rotation and position transform to camera
+	if(move_forward ){ camera.x += look_dir.x; camera.z += look_dir.z; move_forward  = false; }
+	if(move_backward){ camera.x -= look_dir.x; camera.z -= look_dir.z; move_backward = false; }
+
+	cam_rot_angle.x += delta_mouse.x;
+	cam_rot_angle.y += delta_mouse.z;
+	if     (cam_rot_angle.y <= -3.14159265 / 2){ cam_rot_angle.y = -3.14159265 / 2; }
+	else if(cam_rot_angle.y >=  3.14159265 / 2){ cam_rot_angle.y =  3.14159265 / 2; }
 	
-	std::vector<triangle> draw_order;
+	quaternion camera_rotation_x(-cam_rot_angle.x, vec3(0, 1, 0));
+	quaternion camera_rotation_y(cam_rot_angle.y, look_dir.cross_product(vec3(0, 1, 0)));
+	quaternion camera_rotation = camera_rotation_y * camera_rotation_x;
+	new_look_dir = look_dir * camera_rotation.quaternion_to_rotation_matrix();
 
-	//light.normalize();
-
-	//mat4 world;
-	//world = make_rotation_matX(default_mesh.rotation.x);
-	//world *= make_rotation_matY(default_mesh.rotation.y);
-	//world *= make_rotation_matZ(default_mesh.rotation.z);
-	//world *= make_translation_mat(default_mesh.position);
-	
-	vec3 up_vec = { 0, 1, 0 };
-	vec3 target_vec = { 0, 0, 1 };
-
-	if(move_forward ){ camera = camera + look_dir; move_forward  = false; }
-	if(move_backward){ camera = camera - look_dir; move_backward = false; }
-	
-	look_dir = make_rotation_matY(fyaw) * target_vec;
-	target_vec = camera + look_dir;
-
-	mat4 matCamera = matrix_point_at(camera, target_vec, up_vec);
+	//creating view matrices for camera
+	mat4 matCamera = matrix_point_at(camera, camera + new_look_dir, look_dir.cross_product(vec3(1, 0, 0)));
 	mat4 mat_view = matrix_quick_inverse(matCamera);
 	mat4 mat_proj = make_projection_mat();
 
+
+	//vector stores triangles for drawing
+	std::vector<triangle> draw_order;
+
+	//splitting the task of prcessing triangles into multiple threads
 	std::future<std::vector<triangle>> t1 = std::async(std::launch::async, thread_lighting, mat_view, mat_proj);
 	//std::future<std::vector<triangle>> t2 = std::async(std::launch::async, thread_clip, cc.buffer1);
 	std::future<std::vector<triangle>> t2 = std::async(std::launch::async, thread_sort, cc.buffer1);
@@ -240,20 +242,17 @@ GLuint RenderEngine::update(float width, float height){
 	draw_order = t2.get();
 	cc.buffer1 = t1.get();
 
-	
-	//actually drawing the triangles on the buffer
+	//actually drawing the triangles on the frame buffer
 	for(triangle &t : draw_order){
 		draw_triangle(t);
 		if(draw_wireframe_bool){ draw_wireframe(t); };
-	}
-	
+	}	
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-	++frame_rate_counter;
 
 	//cap fps to target fps
 	int frame_duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - mspf_counter_start).count();
 	if(frame_duration < 1000 / target_fps){ Sleep((1000 / target_fps) - frame_duration); }
+	++frame_rate_counter;
 	
 	return color;
 }
@@ -401,7 +400,7 @@ mat4 RenderEngine::make_projection_mat(){
 	projection_mat.m[3][3] = 0.0f;
 	return projection_mat;
 }
-mat4 RenderEngine::matrix_point_at(vec3& pos, vec3& target, vec3& up){
+mat4 RenderEngine::matrix_point_at(vec3 pos, vec3 target, vec3 up){
 	vec3 newForward = target - pos;
 	newForward.normalize();
 
@@ -535,9 +534,13 @@ vec3 vec3::cross_product(vec3 v2){
 	res.z = this->x * v2.y - this->y * v2.x;
 	return res;
 }
-void vec3::normalize(){
+vec3 vec3::normalize(){
 	float l = sqrtf(this->x * this->x + this->y * this->y + this->z * this->z);
 	this->x /= l; this->y /= l; this->z /= l;
+	return *this;
+}
+float vec3::magnitude(){
+	return sqrtf(this->x * this->x + this->y * this->y + this->z * this->z);
 }
 vec3 vec3::operator-(vec3 i){
 	return vec3(this->x - i.x, this->y - i.y, this->z - i.z);
@@ -591,3 +594,46 @@ void vec3::operator*=(mat4 mat){
 	if(w != 0.0f){ o.x /= w; o.y /= w; o.z /= w; }
 	*this = o;
 }
+
+
+quaternion quaternion::operator *(quaternion q2){
+	quaternion res;
+
+	res.w = w * q2.w - x * q2.x - y * q2.y - z * q2.z;
+
+	res.x = w * q2.x + x * q2.w + y * q2.z - z * q2.y;
+	res.y = w * q2.y - x * q2.z + y * q2.w + z * q2.x;
+	res.z = w * q2.z + x * q2.y - y * q2.x + z * q2.w;
+
+	return res;
+}
+void quaternion::operator *=(quaternion q2){
+	quaternion res;
+
+	res.w = w * q2.w - x * q2.x - y * q2.y - z * q2.z;
+
+	res.x = w * q2.x + x * q2.w + y * q2.z - z * q2.y;
+	res.y = w * q2.y - x * q2.z + y * q2.w + z * q2.x;
+	res.z = w * q2.z + x * q2.y - y * q2.x + z * q2.w;
+
+	*this = res;
+}
+mat4 quaternion::quaternion_to_rotation_matrix(){
+
+	mat4 matrix;
+
+	matrix.m[0][0] = 1 - 2 * y * y - 2 * z * z;
+	matrix.m[0][1] = 2 * x * y - 2 * z * w;
+	matrix.m[0][2] = 2 * x * z + 2 * y * w;
+	matrix.m[1][0] = 2 * x * y + 2 * z * w;     
+	matrix.m[1][1] = 1 - 2 * x * x - 2 * z * z;
+	matrix.m[1][2] = 2 * y * z - 2 * x * w;
+	matrix.m[2][0] = 2 * x * z - 2* y * w;
+	matrix.m[2][1] = 2 * y * z + 2* x * w;
+	matrix.m[2][2] = 1 - 2 * x * x - 2* y * y;
+	matrix.m[3][3] = 1;
+
+	return matrix;
+}
+
+

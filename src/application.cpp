@@ -7,30 +7,25 @@
 #include "application.h"
 #include "renderer.h"
 
-bool application_active     = true;
-bool show_app_dockspace     = true;
-bool window_settings        = false;
-bool window_3dviewport      = true;
-bool window_inspector       = true;
-
-bool add_primitive          = false;
-bool init = false;
+bool Application::application_active     = true;
+bool Application::show_app_dockspace     = true;
+bool Application::window_settings        = false;
+bool Application::window_3dviewport      = true;
+bool Application::window_inspector       = true;
+bool Application::window_debug           = true;
+bool Application::init                   = false;
 
 using namespace ImGui;
-void show_dock_space(bool* p_open);
-void show_window_settings(bool* window_settings);
-void show_window_3dviewport(bool* window_3dviewport);
-void show_window_inspector(bool *window_inspector);
 
-void render(){
+void Application::render(){
     show_dock_space(&show_app_dockspace);
 
     if(window_settings      ){ show_window_settings     (&window_settings   ); }
     if(window_3dviewport    ){ show_window_3dviewport   (&window_3dviewport ); }
     if(window_inspector     ){ show_window_inspector    (&window_inspector  ); }
-
+    if(window_debug         ){ show_window_debug        (&window_debug      ); }
 }
-void show_dock_space(bool* p_open){
+void Application::show_dock_space(bool* p_open){
     static ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
 
     ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBringToFrontOnFocus;
@@ -74,7 +69,7 @@ void show_dock_space(bool* p_open){
 
     ImGui::End();
 }
-void show_window_settings(bool* window_settings){
+void Application::show_window_settings(bool* window_settings){
     Begin("Settings", window_settings, ImGuiWindowFlags_NoCollapse);
     BeginChild("ChildL", ImVec2(160, GetContentRegionAvail().y), false, ImGuiWindowFlags_HorizontalScrollbar);
     Button("Category 1", ImVec2(GetContentRegionAvail().x, 40));
@@ -89,34 +84,57 @@ void show_window_settings(bool* window_settings){
 
     End();
 }
+ImVec2 viewport_pos;
+POINT p;
 
 void RenderEngine::io(){
     if(viewport_focused){
-        if(GetAsyncKeyState('W') & 0x8000){ camera = camera + look_dir * 0.5f; }
-        if(GetAsyncKeyState('S') & 0x8000){ camera = camera - look_dir * 0.5f; }
-        if(GetAsyncKeyState('A') & 0x8000){ camera = camera + look_dir.cross_product(RenderEngine::vec3(0, 1, 0)) * 0.5f; }
-        if(GetAsyncKeyState('D') & 0x8000){ camera = camera - look_dir.cross_product(RenderEngine::vec3(0, 1, 0)) * 0.5f; }
+        float speed = 0.5f;
+        float sprint_speed = 2.0f;
+        bool sprinting = false;
+
+        vec3 walk_vec(new_look_dir.x, 0, new_look_dir.z);
+        walk_vec.normalize();
+
+        if(GetAsyncKeyState('Q') & 0x8000){ sprinting = true; }else{ sprinting = false; }
+        if(GetAsyncKeyState('W') & 0x8000){ camera += walk_vec * (sprinting ? sprint_speed : speed); }
+        if(GetAsyncKeyState('S') & 0x8000){ camera -= walk_vec * (sprinting ? sprint_speed : speed); }
+        if(GetAsyncKeyState('A') & 0x8000){ camera += new_look_dir.cross_product(RenderEngine::vec3(0, 1, 0)) * (sprinting ? sprint_speed : speed); }
+        if(GetAsyncKeyState('D') & 0x8000){ camera -= new_look_dir.cross_product(RenderEngine::vec3(0, 1, 0)) * (sprinting ? sprint_speed : speed); }
         if(GetAsyncKeyState(' ') & 0x8000){ camera.y += 0.5f; }
         if(GetAsyncKeyState('R') & 0x8000){ camera.y -= 0.5f; }
-        if(GetAsyncKeyState('O') & 0x8000){ fyaw += 0.08f; }
-        if(GetAsyncKeyState('P') & 0x8000){ fyaw -= 0.08f; }
-        if(GetAsyncKeyState('K') & 0x8000){ }
-        if(GetAsyncKeyState('L') & 0x8000){ }
 
         if(GetAsyncKeyState(VK_ESCAPE) & 0x8000){ SetWindowFocus("inspector"); }
-        ShowCursor(FALSE);
+        //ShowCursor(FALSE);
+        GetCursorPos(&p);
+        SetCursorPos((int)(viewport_pos.x + glutGet(GLUT_WINDOW_X) + (float)fbo_width / 2), (int)(viewport_pos.y + glutGet(GLUT_WINDOW_Y) + (float)fbo_height / 2));
+        delta_mouse.x = (p.x - (viewport_pos.x + glutGet(GLUT_WINDOW_X) + (float)fbo_width / 2)) * mouse_sens;
+        delta_mouse.z = (p.y - (viewport_pos.y + glutGet(GLUT_WINDOW_Y) + (float)fbo_height / 2)) * mouse_sens;
     }else{
-        ShowCursor(TRUE);
+        delta_mouse = vec3();
+        //ShowCursor(TRUE);
     }
 }
-void show_window_3dviewport(bool* window_3dviewport){
+void Application::show_window_3dviewport(bool* window_3dviewport){
     Begin("viewport", window_3dviewport, ImGuiWindowFlags_NoCollapse);
     viewport_focused = IsWindowFocused() ? true : false;
     Image((void *)RenderEngine::update(GetContentRegionAvail().x, GetContentRegionAvail().y), GetContentRegionAvail(), ImVec2(0, 1), ImVec2(1, 0));
+    viewport_pos = GetWindowPos();
     End();
 }
-
-void show_window_inspector(bool *window_inspector){
+void Application::show_window_debug(bool *window_debug){
+    Begin("debug");
+    Dummy(ImVec2(10, 10));
+    Dummy(ImVec2(10, 10));
+    SameLine();
+    BeginChild("text", GetContentRegionAvail());{
+        Text("%f", delta_mouse.x);
+        Text("%f", delta_mouse.z);
+        InputFloat("mouse sensitivity", &mouse_sens);
+    }EndChild();
+    End();
+}
+void Application::show_window_inspector(bool *window_inspector){
     Begin("inspector", window_inspector, ImGuiWindowFlags_NoCollapse);
 
     Dummy(ImVec2(10, 20));
@@ -154,7 +172,7 @@ void show_window_inspector(bool *window_inspector){
 
         Dummy(ImVec2(10, 10));
         Text("Yaw: ");
-        InputFloat("x2.11", &fyaw, 0.1, 1, "%.3f");
+        //InputFloat("x2.11", &fyaw, 0.1, 1, "%.3f");
         
         Dummy(ImVec2(10, 10));
         if(Button("Move forward ")){ move_forward  = true; }
